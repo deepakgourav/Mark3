@@ -1,9 +1,7 @@
 services:
   - type: web
-    name: baccarat-predictor
+    name: Mark3
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:application --bind 0.0.0.0:10000
-    envVars:
-      - key: PORT
-        value: 10000
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    plan: free
