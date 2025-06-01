@@ -2,16 +2,14 @@ from flask import Flask, request, jsonify, render_template
 import json
 import os
 import logging
-from datetime import datetime
-import shutil
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 
-# ✅ Fix hand format like '555' → '5-5-5', 'KQ10' → 'K-Q-10'
+# ✅ Format hand inputs like '555' => '5-5-5'
 def fix_hand(hand_str):
-    valid_cards = {'A','2','3','4','5','6','7','8','9','10','J','Q','K'}
+    valid_cards = {'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'}
     hand_str = str(hand_str).replace('-', '').upper()
     cards = []
     i = 0
@@ -25,22 +23,19 @@ def fix_hand(hand_str):
     return '-'.join(card for card in cards if card in valid_cards)
 
 app = Flask(__name__)
-HISTORICAL_FILE = 'data/game_data.json'
-PREDICT_FEED_FILE = 'data/feed_data.json'
-BACKUP_DIR = 'data/backups'
-MAX_BACKUPS = 5
+DATA_DIR = 'data'
+HISTORICAL_FILE = os.path.join(DATA_DIR, 'game_data.json')
+PREDICT_FEED_FILE = os.path.join(DATA_DIR, 'feed_data.json')
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-os.makedirs(BACKUP_DIR, exist_ok=True)
-os.makedirs(os.path.dirname(HISTORICAL_FILE), exist_ok=True)
-
-# Init files
+# Ensure data directory and files exist
+os.makedirs(DATA_DIR, exist_ok=True)
 for file in [HISTORICAL_FILE, PREDICT_FEED_FILE]:
     if not os.path.exists(file):
         with open(file, 'w') as f:
             json.dump([], f, indent=2)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def load_data(file_path):
     try:
@@ -50,18 +45,16 @@ def load_data(file_path):
                 raise ValueError("Data is not a list")
             return data
     except Exception as e:
-        logger.error(f"Data load error from {file_path}: {str(e)}")
+        logger.error(f"Load error from {file_path}: {e}")
         return []
 
 def save_data(file_path, data):
     try:
-        temp_file = f"{file_path}.tmp"
-        with open(temp_file, 'w') as f:
+        with open(file_path, 'w') as f:
             json.dump(data, f, indent=2)
-        os.replace(temp_file, file_path)
         return True
     except Exception as e:
-        logger.error(f"Data save error to {file_path}: {str(e)}")
+        logger.error(f"Save error to {file_path}: {e}")
         return False
 
 @app.route('/')
@@ -92,7 +85,7 @@ def add_game():
         return jsonify({'success': True}), 201
 
     except Exception as e:
-        logger.error(f"Add game error: {str(e)}")
+        logger.error(f"Add game error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
 @app.route('/add_outcome', methods=['POST'])
@@ -113,7 +106,7 @@ def add_outcome():
         return jsonify({'success': True, 'total_rounds': len(feed)}), 201
 
     except Exception as e:
-        logger.error(f"Add outcome error: {str(e)}")
+        logger.error(f"Add outcome error: {e}")
         return jsonify({'error': 'Server error'}), 500
 
 @app.route('/predict', methods=['GET'])
@@ -133,6 +126,8 @@ def predict():
         for i in range(len(combined) - 10):
             sequence = combined[i:i+10]
             features = [outcome_map.get(g['outcome'], -1) for g in sequence]
+            if -1 in features:
+                continue
             streak = 1
             for j in range(1, 10):
                 if sequence[j]['outcome'] == sequence[j-1]['outcome']:
@@ -141,10 +136,13 @@ def predict():
                     streak = 1
             features.append(streak)
             label = outcome_map.get(combined[i + 10]['outcome'], -1)
-            if -1 in features or label == -1:
+            if label == -1:
                 continue
             X.append(features)
             y.append(label)
+
+        if not X or not y:
+            return jsonify({'error': 'Not enough clean data to train'}), 500
 
         model = VotingClassifier(
             estimators=[
@@ -161,6 +159,9 @@ def predict():
 
         recent = feed[-10:]
         test_features = [outcome_map.get(g['outcome'], -1) for g in recent]
+        if -1 in test_features:
+            return jsonify({'error': 'Invalid outcome in feed'}), 400
+
         streak = 1
         for j in range(1, 10):
             if recent[j]['outcome'] == recent[j-1]['outcome']:
@@ -181,8 +182,8 @@ def predict():
         })
 
     except Exception as e:
-        logger.error(f"Prediction error: {str(e)}")
+        logger.error(f"Prediction error: {e}")
         return jsonify({'error': 'Prediction failed', 'details': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=3000, debug=True)
+    app.run(host='0.0.0.0', port=3000)
